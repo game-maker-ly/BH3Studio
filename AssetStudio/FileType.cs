@@ -14,6 +14,7 @@ namespace AssetStudio
         ResourceFile,
         GZipFile,
         BrotliFile,
-        ZipFile
+        ZipFile,
+        WMVFile
     }
 }

@@ -79,6 +79,8 @@ namespace AssetStudioGUI
             var reader = new FileReader(fileName);
             if (reader.FileType == FileType.BundleFile)
                 extractedCount += ExtractBundleFile(reader, savePath);
+            if (reader.FileType == FileType.WMVFile)
+                extractedCount += ExtractWMVFile(reader, savePath);
             else if (reader.FileType == FileType.WebFile)
                 extractedCount += ExtractWebDataFile(reader, savePath);
             else
@@ -95,6 +97,20 @@ namespace AssetStudioGUI
             {
                 var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
                 return ExtractStreamFile(extractPath, bundleFile.fileList);
+            }
+            return 0;
+        }
+
+        private static int ExtractWMVFile(FileReader reader, string savePath)
+        {
+            StatusStripUpdate($"Decompressing {reader.FileName} ...");
+            var wmvFile = new WMVFile(reader);
+            reader.Dispose();
+            var fileList = wmvFile.Bundles.SelectMany(x => x.Value.fileList).ToArray();
+            if (fileList.Length > 0)
+            {
+                var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
+                return ExtractStreamFile(extractPath, fileList);
             }
             return 0;
         }
@@ -146,54 +162,56 @@ namespace AssetStudioGUI
                 var file = files[i];
                 using (var reader = new FileReader(file))
                 {
-                    var bundleFile = new BundleFile(reader);
-                    foreach (var cab in bundleFile.fileList)
+                    var wmvFile = new WMVFile(reader);
+                    foreach (var bundle in wmvFile.Bundles)
                     {
-                        if (cab.fileName.Contains(".resS"))
-                            continue;
-
-                        using (var cabReader = new FileReader(cab.stream))
+                        foreach(var cab in bundle.Value.fileList)
                         {
-                            var assetsFile = new SerializedFile(cabReader, null);
-                            var objects = assetsFile.m_Objects.Where(x => x.HasExportableType()).ToArray();
-                            foreach (var obj in objects)
+                            if (cab.fileName.Contains(".resS"))
+                                continue;
+
+                            using (var cabReader = new FileReader(cab.stream))
                             {
-                                var objectReader = new ObjectReader(assetsFile.reader, assetsFile, obj);
-                                objectReader.Reset();
-                                string name = string.Empty;
-                                switch (objectReader.type)
+                                var assetsFile = new SerializedFile(cabReader, null);
+                                var objects = assetsFile.m_Objects.Where(x => x.HasExportableType()).ToArray();
+                                foreach (var obj in objects)
                                 {
-                                    case ClassIDType.GameObject:
-                                        var gameObject = new GameObject(objectReader);
-                                        if (!NameLUT.ContainsKey(objectReader.m_PathID))
-                                        {
-                                            NameLUT.Add(objectReader.m_PathID, gameObject.m_Name);
-                                        }
-                                        break;
-                                    case ClassIDType.Shader:
-                                        name = objectReader.ReadAlignedString();
-                                        if (string.IsNullOrEmpty(name))
-                                        {
-                                            var m_parsedForm = new SerializedShader(objectReader);
-                                            name = m_parsedForm.m_Name;
-                                        }
-                                        break;
-                                    case ClassIDType.Animator:
-                                        var gameObjectPPtr = new PPtr<GameObject>(objectReader);
-                                        PPtrLUT.Add((assets.Count, gameObjectPPtr.m_PathID));
-                                        name = "AnimatorPlaceholder";
-                                        break;
-                                    default:
-                                        name = objectReader.ReadAlignedString();
-                                        break;
-                                }
-                                if (!string.IsNullOrEmpty(name))
-                                {
-                                    assets.Add(new AssetEntry(name, reader.FullPath, objectReader.m_PathID, objectReader.type));
+                                    var objectReader = new ObjectReader(assetsFile.reader, assetsFile, obj);
+                                    objectReader.Reset();
+                                    string name = string.Empty;
+                                    switch (objectReader.type)
+                                    {
+                                        case ClassIDType.GameObject:
+                                            var gameObject = new GameObject(objectReader);
+                                            if (!NameLUT.ContainsKey(objectReader.m_PathID))
+                                            {
+                                                NameLUT.Add(objectReader.m_PathID, gameObject.m_Name);
+                                            }
+                                            break;
+                                        case ClassIDType.Shader:
+                                            name = objectReader.ReadAlignedString();
+                                            if (string.IsNullOrEmpty(name))
+                                            {
+                                                var m_parsedForm = new SerializedShader(objectReader);
+                                                name = m_parsedForm.m_Name;
+                                            }
+                                            break;
+                                        case ClassIDType.Animator:
+                                            var gameObjectPPtr = new PPtr<GameObject>(objectReader);
+                                            PPtrLUT.Add((assets.Count, gameObjectPPtr.m_PathID));
+                                            name = "AnimatorPlaceholder";
+                                            break;
+                                        default:
+                                            name = objectReader.ReadAlignedString();
+                                            break;
+                                    }
+                                    if (!string.IsNullOrEmpty(name))
+                                    {
+                                        assets.Add(new AssetEntry(name, reader.FullPath, objectReader.m_PathID, objectReader.type));
+                                    }
                                 }
                             }
                         }
-
                     }
                 }
         

@@ -69,35 +69,11 @@ namespace AssetStudio
 
         public BundleFile(FileReader reader)
         {
-            var files = new List<StreamFile>();
-
-            if (reader.BundlePos.Length != 0)
-            {
-                foreach (var pos in reader.BundlePos)
-                {
-                    reader.Position = pos;
-                    files.AddRange(ReadBundle(reader));
-                }
-            }
-            else
-            {
-                while (reader.Position != reader.Length)
-                {
-                    files.AddRange(ReadBundle(reader));
-                }
-            }
-            
-            fileList = files.ToArray();
-        }
-
-        public List<StreamFile> ReadBundle(FileReader reader)
-        {
-            var files = new List<StreamFile>();
             m_Header = new Header();
             m_Header.signature = reader.ReadStringToNull();
             m_Header.version = 6;
-            m_Header.unityVersion = "2017.4.18f1";
-            m_Header.unityRevision = "5.x.x";
+            m_Header.unityVersion = "5.x.x";
+            m_Header.unityRevision = "2017.4.18f1";
             switch (m_Header.signature)
             {
                 case "UnityArchive":
@@ -112,7 +88,7 @@ namespace AssetStudio
                     using (var blocksStream = CreateBlocksStream(reader.FullPath))
                     {
                         ReadBlocksAndDirectory(reader, blocksStream);
-                        files.AddRange(ReadFiles(blocksStream, reader.FullPath));
+                        ReadFiles(blocksStream, reader.FullPath);
                     }
                     break;
                 case "UnityFS":
@@ -121,12 +97,12 @@ namespace AssetStudio
                     using (var blocksStream = CreateBlocksStream(reader.FullPath))
                     {
                         ReadBlocks(reader, blocksStream);
-                        files.AddRange(ReadFiles(blocksStream, reader.FullPath));
+                        ReadFiles(blocksStream, reader.FullPath);
                     }
                     break;
             }
-            return files;
         }
+
 
         private void ReadHeaderAndBlocksInfo(EndianBinaryReader reader)
         {
@@ -213,9 +189,9 @@ namespace AssetStudio
             }
         }
 
-        public StreamFile[] ReadFiles(Stream blocksStream, string path)
+        public void ReadFiles(Stream blocksStream, string path)
         {
-            var fileList = new StreamFile[m_DirectoryInfo.Length];
+            fileList = new StreamFile[m_DirectoryInfo.Length];
             for (int i = 0; i < m_DirectoryInfo.Length; i++)
             {
                 var node = m_DirectoryInfo[i];
@@ -239,7 +215,6 @@ namespace AssetStudio
                 blocksStream.CopyTo(file.stream, node.size);
                 file.stream.Position = 0;
             }
-            return fileList;
         }
 
         private void DecryptHeader(Header header, int key)

@@ -7,6 +7,7 @@ namespace AssetStudio
 {
     public static class CABManager
     {
+        public static Dictionary<string, HashSet<long>> offsets = new Dictionary<string, HashSet<long>>();
         public static Dictionary<string, WMVEntry> WMVMap = new Dictionary<string, WMVEntry>();
 
         public static void BuildWMVMap(List<string> files)
@@ -15,20 +16,39 @@ namespace AssetStudio
             try
             {
                 WMVMap.Clear();
+                var unityDefaultResources = files.Last();
+                if (unityDefaultResources.Contains("unity default resources"))
+                {
+                    WMVMap.Add("unity default resources", new WMVEntry(unityDefaultResources, 0, new List<string>()));
+                    files.Remove(unityDefaultResources);
+                }
+                var unityBuiltinExtra = files.Last();
+                if (unityBuiltinExtra.Contains("unity_builtin_extra"))
+                {
+                    WMVMap.Add("unity_builtin_extra", new WMVEntry(unityBuiltinExtra, 0, new List<string>()));
+                    files.Remove(unityBuiltinExtra);
+                }
+
                 Progress.Reset();
                 for (int i = 0; i < files.Count; i++)
                 {
                     var file = files[i];
                     using (var reader = new FileReader(file))
                     {
-                        var pos = reader.Position;
-                        var bundlefile = new BundleFile(reader);
-                        foreach (var cab in bundlefile.fileList)
+                        var wmvFile = new WMVFile(reader);
+                        foreach (var bundle in wmvFile.Bundles)
                         {
-                            var cabReader = new FileReader(cab.stream);
-                            if (cabReader.FileType == FileType.AssetsFile)
+                            foreach(var cab in bundle.Value.fileList)
                             {
-                                WMVMap.Add(cab.path, new WMVEntry(file, pos));
+                                using (var cabReader = new FileReader(cab.stream))
+                                {
+                                    if (cabReader.FileType == FileType.AssetsFile)
+                                    {
+                                        var assetsFile = new SerializedFile(cabReader, null);
+                                        var dependancies = assetsFile.m_Externals.Select(x => x.fileName).ToList();
+                                        WMVMap.Add(cab.path, new WMVEntry(file, bundle.Key, dependancies));
+                                    }
+                                }
                             }
                         }
                     }
@@ -41,14 +61,19 @@ namespace AssetStudio
                 var outputFile = new FileInfo(@"WMVMap.bin");
 
                 using (var binaryFile = outputFile.Create())
-                using (var writter = new BinaryWriter(binaryFile))
+                using (var writer = new BinaryWriter(binaryFile))
                 {
-                    writter.Write(WMVMap.Count);
+                    writer.Write(WMVMap.Count);
                     foreach (var cab in WMVMap)
                     {
-                        writter.Write(cab.Key);
-                        writter.Write(cab.Value.Path);
-                        writter.Write(cab.Value.Offset);
+                        writer.Write(cab.Key);
+                        writer.Write(cab.Value.Path);
+                        writer.Write(cab.Value.Offset);
+                        writer.Write(cab.Value.Dependancies.Count);
+                        foreach(var dependancy in cab.Value.Dependancies)
+                        {
+                            writer.Write(dependancy);
+                        }
                     }
                 }
                 Logger.Info($"WMVMap build successfully !!");
@@ -75,7 +100,14 @@ namespace AssetStudio
                         var cab = reader.ReadString();
                         var path = reader.ReadString();
                         var offset = reader.ReadInt64();
-                        WMVMap.Add(cab, new WMVEntry(path, offset));
+                        var depCount = reader.ReadInt32();
+                        var dependancies = new List<string>();
+                        for(int j = 0; j < depCount; j++)
+                        {
+                            var dependancy = reader.ReadString();
+                            dependancies.Add(dependancy);
+                        }
+                        WMVMap.Add(cab, new WMVEntry(path, offset, dependancies));
                     }
                 }
                 Logger.Info(string.Format("Loaded WMVMap !!"));
@@ -85,15 +117,76 @@ namespace AssetStudio
                 Logger.Warning($"WMVMap was not loaded, {e.Message}");
             }
         }
+        public static void AddCabOffset(string cab)
+        {
+            if (WMVMap.TryGetValue(cab, out var wmvEntry))
+            {
+                if (!offsets.ContainsKey(wmvEntry.Path))
+                {
+                    offsets.Add(wmvEntry.Path, new HashSet<long>());
+                }
+                offsets[wmvEntry.Path].Add(wmvEntry.Offset);
+                foreach (var dep in wmvEntry.Dependancies)
+                {
+                    AddCabOffset(dep);
+                }
+            }
+        }
+
+        public static bool FindCABFromWMV(string path, out List<string> cabs)
+        {
+            cabs = new List<string>();
+            foreach (var pair in WMVMap)
+            {
+                if (pair.Value.Path.Contains(path))
+                {
+                    cabs.Add(pair.Key);
+                }
+            }
+            return cabs.Count != 0;
+        }
+
+        public static void ProcessWMVFiles(ref string[] files)
+        {
+            var newFiles = files.ToList();
+            foreach (var file in files)
+            {
+                if (!offsets.ContainsKey(file))
+                {
+                    offsets.Add(file, new HashSet<long>());
+                }
+                if (FindCABFromWMV(file, out var cabs))
+                {
+                    foreach (var cab in cabs)
+                    {
+                        AddCabOffset(cab);
+                    }
+                }
+            }
+            newFiles.AddRange(offsets.Keys.ToList());
+            files = newFiles.ToArray();
+        }
+
+        public static void ProcessDependancies(ref string[] files)
+        {
+            Logger.Info("Resolving Dependancies...");
+            var file = files.FirstOrDefault();
+            if (Path.GetExtension(file) == ".wmv")
+            {
+                ProcessWMVFiles(ref files);
+            }
+        }
     }
     public class WMVEntry : IComparable<WMVEntry>
     {
         public string Path;
         public long Offset;
-        public WMVEntry(string path, long offset)
+        public List<string> Dependancies;
+        public WMVEntry(string path, long offset, List<string> dependancies)
         {
             Path = path;
             Offset = offset;
+            Dependancies = dependancies;
         }
         public int CompareTo(WMVEntry other)
         {

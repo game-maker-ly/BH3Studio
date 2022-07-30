@@ -2129,6 +2129,16 @@ namespace AssetStudioGUI
                 Logger.Info("scanning for WMV files");
                 var files = Directory.GetFiles(openFolderDialog.Folder, "*.wmv", SearchOption.AllDirectories).ToList();
                 Logger.Info(string.Format("found {0} WMV files", files.Count()));
+                var unityBuiltinExtra = Directory.GetFiles(openFolderDialog.Folder, "unity_builtin_extra", SearchOption.AllDirectories).ToList();
+                if (unityBuiltinExtra.Count > 0)
+                {
+                    files.AddRange(unityBuiltinExtra);
+                }
+                var unityDefaultResources = Directory.GetFiles(openFolderDialog.Folder, "unity default resources", SearchOption.AllDirectories).ToList();
+                if (unityDefaultResources.Count > 0)
+                {
+                    files.AddRange(unityDefaultResources);
+                }
                 await Task.Run(() => CABManager.BuildWMVMap(files));
             }
         }

@@ -24,6 +24,7 @@ namespace AssetStudio
         public void LoadFiles(params string[] files)
         {
             var path = Path.GetDirectoryName(Path.GetFullPath(files[0]));
+            CABManager.ProcessDependancies(ref files);
             MergeSplitAssets(path);
             var toReadFile = ProcessingSplitFiles(files.ToList());
             Load(toReadFile);
@@ -78,6 +79,9 @@ namespace AssetStudio
                     break;
                 case FileType.BundleFile:
                     LoadBundleFile(reader);
+                    break;
+                case FileType.WMVFile:
+                    LoadWMVFile(reader);
                     break;
                 case FileType.WebFile:
                     LoadWebFile(reader);
@@ -134,44 +138,6 @@ namespace AssetStudio
                     CheckStrippedVersion(assetsFile);
                     assetsFileList.Add(assetsFile);
                     assetsFileListHash.Add(assetsFile.fileName);
-                    foreach (var sharedFile in assetsFile.m_Externals)
-                    {
-                        var sharedFileName = sharedFile.fileName;
-
-                        if (!importFilesHash.Contains(sharedFileName))
-                        {
-                            var sharedFilePath = Path.Combine(Path.GetDirectoryName(reader.FullPath), sharedFileName);
-                            if (!noexistFiles.Contains(sharedFilePath))
-                            {
-                                if (!File.Exists(sharedFilePath))
-                                {
-                                    var findFiles = Directory.GetFiles(Path.GetDirectoryName(reader.FullPath), sharedFileName, SearchOption.AllDirectories);
-                                    if (findFiles.Length > 0)
-                                    {
-                                        sharedFilePath = findFiles[0];
-                                    }
-                                }
-                                if (CABManager.WMVMap.TryGetValue(sharedFileName, out var entry))
-                                {
-                                    using (var subReader = new FileReader(entry.Path))
-                                    {
-                                        subReader.BundlePos = new long[1];
-                                        subReader.BundlePos[0] = entry.Offset;
-                                        LoadBundleFile(subReader, entry.Path);
-                                    }
-                                }
-                                if (File.Exists(sharedFilePath))
-                                {
-                                    importFiles.Add(sharedFilePath);
-                                    importFilesHash.Add(sharedFileName);
-                                }
-                                else
-                                {
-                                    noexistFiles.Add(sharedFilePath);
-                                }
-                            }
-                        }
-                    }
                 }
                 catch (Exception e)
                 {
@@ -200,6 +166,47 @@ namespace AssetStudio
                     else
                     {
                         resourceFileReaders[file.fileName] = subReader; //TODO
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                var str = $"Error while reading bundle file {reader.FullPath}";
+                if (originalPath != null)
+                {
+                    str += $" from {Path.GetFileName(originalPath)}";
+                }
+                Logger.Error(str, e);
+            }
+            finally
+            {
+                reader.Dispose();
+            }
+        }
+        private void LoadWMVFile(FileReader reader, string originalPath = null)
+        {
+            Logger.Info("Loading " + reader.FullPath);
+            try
+            {
+                if (CABManager.offsets.TryGetValue(reader.FullPath, out var offsets))
+                {
+                    reader.BundlePos = offsets.ToArray();
+                }
+                var wmvFile = new WMVFile(reader);
+                foreach (var bundle in wmvFile.Bundles)
+                {
+                    foreach(var cab in bundle.Value.fileList)
+                    {
+                        var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), cab.fileName);
+                        var subReader = new FileReader(dummyPath, cab.stream);
+                        if (subReader.FileType == FileType.AssetsFile)
+                        {
+                            LoadAssetsFromMemory(subReader, originalPath ?? reader.FullPath, bundle.Value.m_Header.unityRevision);
+                        }
+                        else
+                        {
+                            resourceFileReaders[cab.fileName] = subReader; //TODO
+                        }
                     }
                 }
             }
